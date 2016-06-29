@@ -74,9 +74,7 @@ index 21 -> type 8, value '0xdeadbeef'
 16 vs. 16 -> equals=1, strict_equals=1
 17 vs. 12 -> equals=1, strict_equals=0
 17 vs. 17 -> equals=1, strict_equals=1
-17 vs. 18 -> equals=1, strict_equals=0
 18 vs. 12 -> equals=1, strict_equals=0
-18 vs. 17 -> equals=1, strict_equals=0
 18 vs. 18 -> equals=1, strict_equals=1
 19 vs. 13 -> equals=1, strict_equals=0
 19 vs. 19 -> equals=1, strict_equals=1
