@@ -1593,6 +1593,15 @@ Planned
 2.0.0 (XXXX-XX-XX)
 ------------------
 
+* Incompatible change: rework buffer types and their Ecmascript and C API
+  behavior: plain buffers now behave like ArrayBuffers and inherit from
+  ArrayBuffer.prototype (GH-864)
+
+* Incompatible change: plain pointer values now test true in instanceof
+  (plainPointer instanceof Duktape.Pointer === true) (GH-864)
+
+* Incompatible change: FIXME, lightfunc ToObject() coercion?
+
 * Incompatible change: add a userdata argument to duk_safe_call() to make it
   easier to pass C pointers to safe functions (GH-277, GH-727)
 
