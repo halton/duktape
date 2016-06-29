@@ -164,6 +164,16 @@ DUK_LOCAL duk_bool_t duk__key_is_lightfunc_ownprop(duk_hthread *thr, duk_hstring
 	        key == DUK_HTHREAD_STRING_NAME(thr));
 }
 
+/* String is an own (virtual) property of a plain buffer. */
+DUK_LOCAL duk_bool_t duk__key_is_plain_buf_ownprop(duk_hthread *thr, duk_hstring *key) {
+	DUK_UNREF(thr);
+	/* FIXME: index keys? */
+	return (key == DUK_HTHREAD_STRING_LENGTH(thr) ||
+	        key == DUK_HTHREAD_STRING_BYTE_LENGTH(thr) ||
+	        key == DUK_HTHREAD_STRING_BYTE_OFFSET(thr) ||
+	        key == DUK_HTHREAD_STRING_BYTES_PER_ELEMENT(thr));
+}
+
 /*
  *  Helpers for managing property storage size
  */
@@ -2543,8 +2553,8 @@ DUK_INTERNAL duk_bool_t duk_hobject_getprop(duk_hthread *thr, duk_tval *tv_obj, 
 			return 1;
 		}
 
-		DUK_DDD(DUK_DDDPRINT("base object is a buffer, start lookup from buffer prototype"));
-		curr = thr->builtins[DUK_BIDX_BUFFER_PROTOTYPE];
+		DUK_DDD(DUK_DDDPRINT("base object is a buffer, start lookup from ArrayBuffer prototype"));
+		curr = thr->builtins[DUK_BIDX_ARRAYBUFFER_PROTOTYPE];
 		goto lookup;  /* avoid double coercion */
 	}
 
@@ -2764,7 +2774,7 @@ DUK_INTERNAL duk_bool_t duk_hobject_hasprop(duk_hthread *thr, duk_tval *tv_obj, 
 	 *
 	 *  However, lightfuncs need to behave like fully fledged objects
 	 *  here to be maximally transparent, so we need to handle them
-	 *  here.
+	 *  here.  Same goes for plain buffers which behave like ArrayBuffers.
 	 */
 
 	/* XXX: Refactor key coercion so that it's only called once.  It can't
@@ -2777,10 +2787,16 @@ DUK_INTERNAL duk_bool_t duk_hobject_hasprop(duk_hthread *thr, duk_tval *tv_obj, 
 		DUK_ASSERT(obj != NULL);
 
 		arr_idx = duk__push_tval_to_hstring_arr_idx(ctx, tv_key, &key);
+	} else if (DUK_TVAL_IS_BUFFER(tv_obj)) {
+		arr_idx = duk__push_tval_to_hstring_arr_idx(ctx, tv_key, &key);
+		if (duk__key_is_plain_buf_ownprop(thr, key)) {
+			rc = 1;
+			goto pop_and_return;
+		}
+		obj = thr->builtins[DUK_BIDX_ARRAYBUFFER_PROTOTYPE];
 	} else if (DUK_TVAL_IS_LIGHTFUNC(tv_obj)) {
 		arr_idx = duk__push_tval_to_hstring_arr_idx(ctx, tv_key, &key);
 		if (duk__key_is_lightfunc_ownprop(thr, key)) {
-			/* FOUND */
 			rc = 1;
 			goto pop_and_return;
 		}
@@ -4644,7 +4660,7 @@ DUK_INTERNAL void duk_hobject_define_property_internal_arridx(duk_hthread *thr, 
 
 	DUK_DDD(DUK_DDDPRINT("define property fast path didn't work, use slow path"));
 
-	duk_push_uint(ctx, (duk_uint_t) arr_idx);
+	duk_push_uint(ctx, (duk_uint_t) arr_idx);  /* FIXME: shared */
 	key = duk_to_hstring(ctx, -1);
 	DUK_ASSERT(key != NULL);
 	duk_insert(ctx, -2);  /* [ ... val key ] -> [ ... key val ] */

@@ -495,6 +495,7 @@ DUK_EXTERNAL_DECL duk_bool_t duk_is_dynamic_buffer(duk_context *ctx, duk_idx_t i
 DUK_EXTERNAL_DECL duk_bool_t duk_is_fixed_buffer(duk_context *ctx, duk_idx_t idx);
 DUK_EXTERNAL_DECL duk_bool_t duk_is_external_buffer(duk_context *ctx, duk_idx_t idx);
 
+/* FIXME: should 'buffer' be considered primitive from API point of view? */
 #define duk_is_primitive(ctx,idx) \
 	duk_check_type_mask((ctx), (idx), DUK_TYPE_MASK_UNDEFINED | \
 	                                  DUK_TYPE_MASK_NULL | \

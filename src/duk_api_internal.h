@@ -31,6 +31,36 @@ duk_bool_t duk_valstack_resize_raw(duk_context *ctx,
 #if defined(DUK_USE_VERBOSE_ERRORS) && defined(DUK_USE_PARANOID_ERRORS)
 DUK_INTERNAL_DECL const char *duk_get_type_name(duk_context *ctx, duk_idx_t idx);
 #endif
+DUK_INTERNAL_DECL duk_small_uint_t duk_get_class_number(duk_context *ctx, duk_idx_t idx);
+
+/* True if tagged value behaves like an object. */
+#define DUK_TYPE_MASK_OBJECT_LIKE \
+	(DUK_TYPE_MASK_OBJECT | \
+	 DUK_TYPE_MASK_BUFFER | \
+	 DUK_TYPE_MASK_LIGHTFUNC)
+#define duk_is_object_like(ctx,idx) \
+	duk_check_type_mask((ctx), (idx), DUK_TYPE_MASK_OBJECT_LIKE)
+#define duk_require_object_like(ctx,idx) \
+	duk_require_type_mask((ctx), (idx), DUK_TYPE_MASK_OBJECT_LIKE)
+
+/* FIXME: duk_is_primitive() now considers plain buffer
+ * to be primitive; this doesn't work here as Ecmascript
+ * operators should not consider it primitive.
+ */
+/* FIXME: same applies to lightfuncs? */
+
+/* True if tagged value is considered primitive for Ecmascript semantics.
+ * Lightfuncs and plain buffers behave like objects so they're not considered
+ * primitive in this sense, although they are primitive (duk_is_primitive())
+ * in the C API.
+ */
+#define duk_is_primitive_for_ecmascript(ctx,idx) \
+	duk_check_type_mask((ctx), (idx), DUK_TYPE_MASK_UNDEFINED | \
+	                                  DUK_TYPE_MASK_NULL | \
+	                                  DUK_TYPE_MASK_BOOLEAN | \
+	                                  DUK_TYPE_MASK_NUMBER | \
+	                                  DUK_TYPE_MASK_STRING | \
+	                                  DUK_TYPE_MASK_POINTER)
 
 DUK_INTERNAL_DECL duk_tval *duk_get_tval(duk_context *ctx, duk_idx_t idx);
 DUK_INTERNAL_DECL duk_tval *duk_require_tval(duk_context *ctx, duk_idx_t idx);
@@ -103,6 +133,8 @@ DUK_INTERNAL_DECL duk_int_t duk_to_int_check_range(duk_context *ctx, duk_idx_t i
 #if defined(DUK_USE_BUFFEROBJECT_SUPPORT)
 DUK_INTERNAL_DECL duk_uint8_t duk_to_uint8clamped(duk_context *ctx, duk_idx_t idx);
 #endif
+
+DUK_INTERNAL_DECL const char *duk_buffer_to_string(duk_context *ctx, duk_idx_t idx);
 
 DUK_INTERNAL_DECL duk_hstring *duk_require_hstring(duk_context *ctx, duk_idx_t idx);
 DUK_INTERNAL_DECL duk_hobject *duk_require_hobject(duk_context *ctx, duk_idx_t idx);

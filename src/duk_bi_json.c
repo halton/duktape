@@ -468,7 +468,7 @@ DUK_LOCAL void duk__dec_string(duk_json_dec_ctx *js_ctx) {
 #endif  /* DUK_USE_JSON_DECSTRING_FASTPATH */
 
 	DUK_BW_SETPTR_AND_COMPACT(js_ctx->thr, bw, q);
-	duk_to_string(ctx, -1);
+	(void) duk_buffer_to_string(ctx, -1);
 
 	/* [ ... str ] */
 
@@ -1373,7 +1373,7 @@ DUK_LOCAL void duk__enc_double(duk_json_enc_ctx *js_ctx) {
 			/* [ ... number ] -> [ ... string ] */
 			duk_numconv_stringify(ctx, 10 /*radix*/, 0 /*digits*/, n2s_flags);
 		}
-		h_str = duk_to_hstring(ctx, -1);
+		h_str = duk_to_hstring(ctx, -1);  /* FIXME: duk_get_hstring */
 		DUK_ASSERT(h_str != NULL);
 		DUK__EMIT_HSTR(js_ctx, h_str);
 		return;
@@ -2484,7 +2484,7 @@ DUK_LOCAL duk_bool_t duk__json_stringify_fast_value(duk_json_enc_ctx *js_ctx, du
 				 * to support gappy arrays for all practical code.
 				 */
 
-				/* XXX: refactor into an internal helper, pretty awkward */
+				/* FIXME: refactor into an internal helper, pretty awkward */
 				duk_push_uint((duk_context *) js_ctx->thr, (duk_uint_t) i);
 				h_tmp = duk_to_hstring((duk_context *) js_ctx->thr, -1);
 				DUK_ASSERT(h_tmp != NULL);

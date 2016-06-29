@@ -2,6 +2,8 @@
  *  Duktape.Buffer, Node.js Buffer, and Khronos/ES6 TypedArray built-ins
  */
 
+/* FIXME: accept plain buffer everywhere an ArrayBuffer is accepted */
+
 #include "duk_internal.h"
 
 /*
@@ -386,6 +388,27 @@ DUK_LOCAL void duk__clamp_startend_negidx_shifted(duk_context *ctx,
 	*out_end_offset = end_offset;
 }
 #endif  /* DUK_USE_BUFFEROBJECT_SUPPORT */
+
+/*
+ *  Coercion helper
+ */
+
+DUK_INTERNAL void duk_hbufobj_push_arraybuffer_from_plain(duk_hthread *thr, duk_hbuffer *h_buf) {
+	duk_context *ctx;
+	duk_hbufobj *h_bufobj;
+
+	ctx = (duk_context *) thr;
+
+	/* Push ArrayBuffer which will share the same underlying buffer. */
+	h_bufobj = duk_push_bufobj_raw(ctx,
+	                               DUK_HOBJECT_FLAG_EXTENSIBLE |
+	                               DUK_HOBJECT_FLAG_BUFOBJ |
+	                               DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_ARRAYBUFFER),
+	                               DUK_BIDX_ARRAYBUFFER_PROTOTYPE);
+	DUK_ASSERT(h_bufobj != NULL);
+	duk__set_bufobj_buffer(ctx, h_bufobj, h_buf);
+	DUK_ASSERT_HBUFOBJ_VALID(h_bufobj);
+}
 
 /*
  *  Indexed read/write helpers (also used from outside this file)
@@ -800,6 +823,11 @@ DUK_INTERNAL duk_ret_t duk_bi_typedarray_constructor(duk_context *ctx) {
 		h_obj = DUK_TVAL_GET_OBJECT(tv);
 		DUK_ASSERT(h_obj != NULL);
 
+		/* FIXME: support for plain buffer argument, create view.
+		 * Can handle explicitly or by coercing to an equivalent
+		 * temporary ArrayBuffer first.
+		 */
+
 		if (DUK_HOBJECT_GET_CLASS_NUMBER(h_obj) == DUK_HOBJECT_CLASS_ARRAYBUFFER) {
 			/* ArrayBuffer: unlike any other argument variant, create
 			 * a view into the existing buffer.
@@ -922,6 +950,7 @@ DUK_INTERNAL duk_ret_t duk_bi_typedarray_constructor(duk_context *ctx) {
 			copy_mode = 2;
 		}
 	} else if (DUK_TVAL_IS_BUFFER(tv)) {
+		/* FIXME: to be removed */
 		/* Accept plain buffer values like array initializers
 		 * (new in Duktape 1.4.0).
 		 */
@@ -1230,7 +1259,7 @@ DUK_INTERNAL duk_ret_t duk_bi_nodejs_buffer_tostring(duk_context *ctx) {
 		;
 	}
 
-	duk_to_string(ctx, -1);
+	(void) duk_buffer_to_string(ctx, -1);
 	return 1;
 
  type_error:
@@ -1290,7 +1319,7 @@ DUK_INTERNAL duk_ret_t duk_bi_buffer_prototype_tostring_shared(duk_context *ctx)
 	}
 
 	if (to_string) {
-		duk_to_string(ctx, -1);
+		(void) duk_buffer_to_string(ctx, -1);
 	}
 	return 1;
 

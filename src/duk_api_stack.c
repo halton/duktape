@@ -1627,6 +1627,7 @@ DUK_INTERNAL duk_hobject *duk_get_hobject_or_lfunc_coerce(duk_context *ctx, duk_
 /* Useful for internal call sites where we either expect an object (function)
  * or a lightfunc.  Returns NULL for a lightfunc.
  */
+/* FIXME: buffer change, maybe rename to hobject_like? same for other similar helpers */
 DUK_INTERNAL duk_hobject *duk_require_hobject_or_lfunc(duk_context *ctx, duk_idx_t idx) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_tval *tv;
@@ -1778,7 +1779,14 @@ DUK_LOCAL duk_bool_t duk__defaultvalue_coerce_attempt(duk_context *ctx, duk_idx_
 		if (duk_is_callable(ctx, -1)) {
 			duk_dup(ctx, idx);         /* -> [ ... func this ] */
 			duk_call_method(ctx, 0);     /* -> [ ... retval ] */
-			if (duk_is_primitive(ctx, -1)) {
+			if (duk_is_primitive_for_ecmascript(ctx, -1)) {
+				/* The public duk_is_primitive() API call
+				 * considers plain buffers and lightfuncs to
+				 * be primitive which doesn't work well here:
+				 * we want a plain buffer to be coerced into
+				 * e.g. '[object ArrayBuffer]' and not be
+				 * returned as is.
+				 */
 				duk_replace(ctx, idx);
 				return 1;
 			}
@@ -1791,7 +1799,6 @@ DUK_LOCAL duk_bool_t duk__defaultvalue_coerce_attempt(duk_context *ctx, duk_idx_
 
 DUK_EXTERNAL void duk_to_defaultvalue(duk_context *ctx, duk_idx_t idx, duk_int_t hint) {
 	duk_hthread *thr = (duk_hthread *) ctx;
-	duk_hobject *obj;
 	/* inline initializer for coercers[] is not allowed by old compilers like BCC */
 	duk_small_int_t coercers[2];
 
@@ -1802,10 +1809,10 @@ DUK_EXTERNAL void duk_to_defaultvalue(duk_context *ctx, duk_idx_t idx, duk_int_t
 	coercers[1] = DUK_STRIDX_TO_STRING;
 
 	idx = duk_require_normalize_index(ctx, idx);
-	obj = duk_require_hobject_or_lfunc(ctx, idx);
+	duk_require_object_like(ctx, idx);
 
 	if (hint == DUK_HINT_NONE) {
-		if (obj != NULL && DUK_HOBJECT_GET_CLASS_NUMBER(obj) == DUK_HOBJECT_CLASS_DATE) {
+		if (duk_get_class_number(ctx, idx) == DUK_HOBJECT_CLASS_DATE) {
 			hint = DUK_HINT_STRING;
 		} else {
 			hint = DUK_HINT_NUMBER;
@@ -1859,12 +1866,22 @@ DUK_EXTERNAL void duk_to_primitive(duk_context *ctx, duk_idx_t idx, duk_int_t hi
 
 	idx = duk_require_normalize_index(ctx, idx);
 
-	if (!duk_check_type_mask(ctx, idx, DUK_TYPE_MASK_OBJECT |
-	                                     DUK_TYPE_MASK_LIGHTFUNC)) {
-		/* everything except object stay as is */
-		return;
+	if (duk_check_type_mask(ctx, idx, DUK_TYPE_MASK_OBJECT |
+	                                  DUK_TYPE_MASK_LIGHTFUNC |
+	                                  DUK_TYPE_MASK_BUFFER)) {
+		/* Objects are coerced based on E5 specification.
+		 * Lightfuncs are coerced because they behave like
+		 * objects even if they're internally a primitive
+		 * type.  Same applies to plain buffers, which behave
+		 * like ArrayBuffer objects since Duktape 2.x.
+		 */
+		duk_to_defaultvalue(ctx, idx, hint);
+	} else {
+		/* Any other values stay as is. */
+		;
 	}
-	duk_to_defaultvalue(ctx, idx, hint);
+
+	DUK_ASSERT(!duk_is_buffer(ctx, idx));  /* duk_to_string() relies on this behavior */
 }
 
 /* E5 Section 9.2 */
@@ -2043,6 +2060,7 @@ DUK_EXTERNAL const char *duk_to_lstring(duk_context *ctx, duk_idx_t idx, duk_siz
 	DUK_ASSERT_CTX_VALID(ctx);
 
 	(void) duk_to_string(ctx, idx);
+	DUK_ASSERT(duk_is_string(ctx, idx));
 	return duk_require_lstring(ctx, idx, out_len);
 }
 
@@ -2142,8 +2160,7 @@ DUK_INTERNAL void duk_push_class_string_tval(duk_context *ctx, duk_tval *tv) {
 		break;
 	}
 	case DUK_TAG_BUFFER: {
-		/* XXX: needs a plain buffer fix */
-		stridx = DUK_STRIDX_UC_BUFFER;
+		stridx = DUK_STRIDX_ARRAY_BUFFER;
 		break;
 	}
 #if defined(DUK_USE_FASTINT)
@@ -2268,20 +2285,12 @@ DUK_EXTERNAL const char *duk_to_string(duk_context *ctx, duk_idx_t idx) {
 		/* nop */
 		goto skip_replace;
 	}
+	case DUK_TAG_BUFFER: /* Go through ArrayBuffer.prototype.toString() for coercion. */
 	case DUK_TAG_OBJECT: {
 		duk_to_primitive(ctx, idx, DUK_HINT_STRING);
+		DUK_ASSERT(!duk_is_buffer(ctx, idx));  /* ToPrimitive() must guarantee */
+		DUK_ASSERT(!duk_is_object(ctx, idx));
 		return duk_to_string(ctx, idx);  /* Note: recursive call */
-	}
-	case DUK_TAG_BUFFER: {
-		duk_hbuffer *h = DUK_TVAL_GET_BUFFER(tv);
-
-		/* Note: this allows creation of internal strings. */
-
-		DUK_ASSERT(h != NULL);
-		duk_push_lstring(ctx,
-		                 (const char *) DUK_HBUFFER_GET_DATA_PTR(thr->heap, h),
-		                 (duk_size_t) DUK_HBUFFER_GET_SIZE(h));
-		break;
 	}
 	case DUK_TAG_POINTER: {
 		void *ptr = DUK_TVAL_GET_POINTER(tv);
@@ -2320,6 +2329,7 @@ DUK_EXTERNAL const char *duk_to_string(duk_context *ctx, duk_idx_t idx) {
 	duk_replace(ctx, idx);
 
  skip_replace:
+	DUK_ASSERT(duk_is_string(ctx, idx));
 	return duk_require_string(ctx, idx);
 }
 
@@ -2329,6 +2339,26 @@ DUK_INTERNAL duk_hstring *duk_to_hstring(duk_context *ctx, duk_idx_t idx) {
 	duk_to_string(ctx, idx);
 	ret = duk_get_hstring(ctx, idx);
 	DUK_ASSERT(ret != NULL);
+	return ret;
+}
+
+/* Internal helper to convert a plain buffer to a string.  This is necessary
+ * in Duktape 2.x because ToString(plainBuffer) no longer creates a string with
+ * the same bytes as in the buffer but rather (usually) '[object ArrayBuffer]'.
+ */
+DUK_INTERNAL const char *duk_buffer_to_string(duk_context *ctx, duk_idx_t idx) {
+	duk_hbuffer *h_buf;
+	const char *ret;
+
+	/* XXX: more direct implementation */
+	idx = duk_require_normalize_index(ctx, idx);
+	DUK_ASSERT(duk_is_buffer(ctx, idx));
+	h_buf = duk_get_hbuffer(ctx, idx);
+	DUK_ASSERT(h_buf != NULL);
+	ret = duk_push_lstring(ctx,
+	                       (const char *) DUK_HBUFFER_GET_DATA_PTR(thr->heap, h_buf),
+	                       (duk_size_t) DUK_HBUFFER_GET_SIZE(h_buf));
+	duk_replace(ctx, idx);
 	return ret;
 }
 
@@ -2445,6 +2475,11 @@ DUK_EXTERNAL void *duk_to_pointer(duk_context *ctx, duk_idx_t idx) {
 	return res;
 }
 
+/* FIXME: document whether result is guaranteed to be a duk_hobject or not.
+ * That's the case for lightfuncs now (should it; not consistent with lfuncs
+ * mimicing function objects) but probably not for plain buffers when they
+ * mimic ArrayBuffer.
+ */
 DUK_EXTERNAL void duk_to_object(duk_context *ctx, duk_idx_t idx) {
 	duk_hthread *thr = (duk_hthread *) ctx;
 	duk_tval *tv;
@@ -2482,35 +2517,29 @@ DUK_EXTERNAL void duk_to_object(duk_context *ctx, duk_idx_t idx) {
 		break;
 	}
 	case DUK_TAG_BUFFER: {
-		/* A plain buffer coerces to a Duktape.Buffer because it's the
-		 * object counterpart of the plain buffer value.  But it might
-		 * still make more sense to produce an ArrayBuffer here?
+		/* A plain buffer object coerces to a full ArrayBuffer which
+		 * is not fully transparent behavior (ToObject() should be a
+		 * nop for an object).  This behavior matches lightfuncs which
+		 * also coerce to an equivalent Function object.  There are
+		 * also downsides to defining ToObject(plainBuffer) as a no-op.
 		 */
+		duk_hbuffer *h_buf;
 
-		duk_hbufobj *h_bufobj;
-		duk_hbuffer *h_val;
-
-		h_val = DUK_TVAL_GET_BUFFER(tv);
-		DUK_ASSERT(h_val != NULL);
-
-		h_bufobj = duk_push_bufobj_raw(ctx,
-		                               DUK_HOBJECT_FLAG_EXTENSIBLE |
-		                               DUK_HOBJECT_FLAG_BUFOBJ |
-		                               DUK_HOBJECT_CLASS_AS_FLAGS(DUK_HOBJECT_CLASS_BUFFER),
-		                               DUK_BIDX_BUFFER_PROTOTYPE);
-		DUK_ASSERT(h_bufobj != NULL);
-		DUK_ASSERT(DUK_HOBJECT_HAS_EXTENSIBLE((duk_hobject *) h_bufobj));
-		DUK_ASSERT(DUK_HOBJECT_IS_BUFOBJ((duk_hobject *) h_bufobj));
-
-		h_bufobj->buf = h_val;
-		DUK_HBUFFER_INCREF(thr, h_val);
-		DUK_ASSERT(h_bufobj->offset == 0);
-		h_bufobj->length = (duk_uint_t) DUK_HBUFFER_GET_SIZE(h_val);
-		DUK_ASSERT(h_bufobj->shift == 0);
-		DUK_ASSERT(h_bufobj->elem_type == DUK_HBUFOBJ_ELEM_UINT8);
-
-		DUK_ASSERT_HBUFOBJ_VALID(h_bufobj);
+		h_buf = DUK_TVAL_GET_BUFFER(tv);
+		DUK_ASSERT(h_buf != NULL);
+		duk_hbufobj_push_arraybuffer_from_plain(thr, h_buf);
 		goto replace_value;
+
+#if 0  /* FIXME */
+		/* A plain buffer mimics an ArrayBuffer instance and is thus
+		 * returned as is in Duktape 2.x.  In Duktape 1.x a plain
+		 * buffer coerces to an equivalent Duktape.Buffer.
+		 *
+		 * This means that duk_get_hobject() for a duk_to_object()
+		 * result is NOT guaranteed to be non-NULL.
+		 */
+		break;
+#endif
 	}
 	case DUK_TAG_POINTER: {
 		flags = DUK_HOBJECT_FLAG_EXTENSIBLE |
@@ -2519,12 +2548,13 @@ DUK_EXTERNAL void duk_to_object(duk_context *ctx, duk_idx_t idx) {
 		goto create_object;
 	}
 	case DUK_TAG_LIGHTFUNC: {
+		/* FIXME: revisit this in light of plain buffer vs. ArrayBuffer */
+
 		/* Lightfunc coerces to a Function instance with concrete
 		 * properties.  Since 'length' is virtual for Duktape/C
-		 * functions, don't need to define that.
-		 *
-		 * The result is made extensible to mimic what happens to
-		 * strings:
+		 * functions, don't need to define that.  The result is made
+		 * extensible to mimic what happens to strings in object
+		 * coercion:
 		 *   > Object.isExtensible(Object('foo'))
 		 *   true
 		 */
@@ -2686,6 +2716,32 @@ DUK_INTERNAL const char *duk_get_type_name(duk_context *ctx, duk_idx_t idx) {
 	return duk__type_names[type_tag];
 }
 #endif
+
+DUK_INTERNAL duk_small_uint_t duk_get_class_number(duk_context *ctx, duk_idx_t idx) {
+	duk_tval *tv;
+	duk_hobject *obj;
+
+	tv = duk_get_tval(ctx, idx);
+	if (tv == NULL) {
+		return DUK_HOBJECT_CLASS_UNUSED;  /* FIXME: rename to NONE */
+	}
+
+	switch (DUK_TVAL_GET_TAG(tv)) {
+	case DUK_TAG_OBJECT:
+		obj = DUK_TVAL_GET_OBJECT(tv);
+		DUK_ASSERT(obj != NULL);
+		return DUK_HOBJECT_GET_CLASS_NUMBER(obj);
+	case DUK_TAG_BUFFER:
+		/* Buffers behave like ArrayBuffer objects. */
+		return DUK_HOBJECT_CLASS_ARRAYBUFFER;
+	case DUK_TAG_LIGHTFUNC:
+		/* Lightfuncs behave like Function objects. */
+		return DUK_HOBJECT_CLASS_FUNCTION;
+	default:
+		/* Primitive, no class number. */
+		return DUK_HOBJECT_CLASS_UNUSED;
+	}
+}
 
 DUK_EXTERNAL duk_bool_t duk_check_type(duk_context *ctx, duk_idx_t idx, duk_int_t type) {
 	DUK_ASSERT_CTX_VALID(ctx);
@@ -3446,8 +3502,8 @@ DUK_EXTERNAL const char *duk_push_vsprintf(duk_context *ctx, const char *fmt, va
 		}
 	}
 
-	/* Cannot use duk_to_string() on the buffer because it is usually
-	 * larger than 'len'.  Also, 'buf' is usually a stack buffer.
+	/* Cannot use duk_buffer_to_string() on the buffer because it is
+	 * usually larger than 'len'; 'buf' is also usually a stack buffer.
 	 */
 	res = duk_push_lstring(ctx, (const char *) buf, (duk_size_t) len);  /* [ buf? res ] */
 	if (pushed_buf) {
@@ -4697,6 +4753,9 @@ DUK_LOCAL const char *duk__push_string_tval_readable(duk_context *ctx, duk_tval 
 			break;
 		}
 		case DUK_TAG_BUFFER: {
+			/* FIXME: change to [object ArrayBuffer] for consistency?  Or also change
+			 * full arraybuffers / typed arrays to print out more usefully?
+			 */
 			/* XXX: Hex encoded, length limited buffer summary here? */
 			duk_hbuffer *h = DUK_TVAL_GET_BUFFER(tv);
 			DUK_ASSERT(h != NULL);

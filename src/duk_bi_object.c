@@ -11,14 +11,15 @@ DUK_INTERNAL duk_ret_t duk_bi_object_constructor(duk_context *ctx) {
 		return 1;
 	}
 
+	/* FIXME: change to duk_is_object_like()? */
 	if (duk_is_object(ctx, 0)) {
 		return 1;
 	}
 
 	/* Pointer and buffer primitive values are treated like other
 	 * primitives values which have a fully fledged object counterpart:
-	 * promote to an object value.  Lightfuncs are coerced with
-	 * ToObject() even they could also be returned as is.
+	 * promote to an object value.  Lightfuncs and plain buffers are
+	 * coerced with ToObject() even they could also be returned as is.
 	 */
 	if (duk_check_type_mask(ctx, 0, DUK_TYPE_MASK_STRING |
 	                                DUK_TYPE_MASK_BOOLEAN |
